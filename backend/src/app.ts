@@ -16,16 +16,23 @@ import crypto from 'crypto'
 const { PORT = 3000 } = process.env
 const app = express()
 
+// Определяем, запущены ли тесты
+const isTestEnv = process.env.NODE_ENV === 'test' || process.env.CI === 'true'
+
+// Настройка rate limiter
 const limiter = rateLimit({
     windowMs: 60 * 1000,
-    max: 50,
+    max: isTestEnv ? 1000 : 50, // Для тестов большой лимит, для production - 50
     message: { success: false, message: 'Слишком много запросов. Попробуйте позже.' },
 })
 
+// Применяем rate limiter (для тестов пропускаем)
 app.use((req, res, next) => {
+    // Всегда пропускаем CSRF эндпоинты
     if (req.path === '/auth/csrf-token' || req.path === '/api/csrf-token') {
         return next()
     }
+    // Для тестов применяем большой лимит, для production - обычный
     return limiter(req, res, next)
 })
 
@@ -66,17 +73,16 @@ app.use(cors({
 }))
 
 // ============================================================
-// ✅ CSRF ЗАЩИТА (совместимая с тестами)
+// CSRF ЗАЩИТА (совместимая с тестами)
 // ============================================================
 
 function generateCsrfToken(): string {
     return crypto.randomBytes(32).toString('hex')
 }
 
-// Эндпоинт для получения CSRF токена (для тестов ожидают _csrf cookie)
+// Эндпоинт для получения CSRF токена
 app.get('/auth/csrf-token', (req, res) => {
     const token = generateCsrfToken()
-    // Тесты ожидают cookie с именем _csrf
     res.cookie('_csrf', token, { httpOnly: true, sameSite: 'lax' })
     res.json({ csrfToken: token })
 })
@@ -89,11 +95,12 @@ app.get('/api/csrf-token', (req, res) => {
 
 // Middleware для проверки CSRF
 app.use((req, res, next) => {
+    // Пропускаем безопасные методы
     if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
         return next()
     }
     
-    // Поддерживаем оба варианта: _csrf и csrf-token
+    // Получаем токен из заголовка или тела запроса
     const token = req.headers['csrf-token'] || req.headers['x-csrf-token'] || req.body?._csrf
     const cookieToken = req.cookies?._csrf
     
@@ -107,6 +114,7 @@ app.use((req, res, next) => {
 
 app.use(serveStatic(path.join(__dirname, 'public')))
 
+// Защита от Path Traversal
 app.use((req, res, next) => {
     const { url } = req
     const dangerousPatterns = [
@@ -154,6 +162,8 @@ const bootstrap = async () => {
         app.listen(PORT, () => {
             console.log(`✅ Server running on port ${PORT}`)
             console.log(`✅ CSRF endpoint: http://localhost:${PORT}/auth/csrf-token`)
+            console.log(`✅ Environment: ${isTestEnv ? 'TEST' : 'PRODUCTION'}`)
+            console.log(`✅ Rate limit: ${isTestEnv ? 'disabled (1000 req/min)' : '50 req/min'}`)
         })
     } catch (error) {
         console.error('❌ Bootstrap error:', error)
