@@ -1,4 +1,3 @@
-import { errors } from 'celebrate'
 import cookieParser from 'cookie-parser'
 import cors from 'cors'
 import 'dotenv/config'
@@ -17,19 +16,17 @@ import routes from './routes'
 const { PORT = 3000 } = process.env
 const app = express()
 
-// Настройка rate limiter (максимально простая, без кастомных настроек)
 const limiter = rateLimit({
     windowMs: 60 * 1000,
     max: 50,
     message: { success: false, message: 'Слишком много запросов. Попробуйте позже.' },
 })
 
-// Применяем rate limiter глобально (кроме CSRF токена)
 app.use((req, res, next) => {
     if (req.path === '/auth/csrf-token' || req.path === '/api/csrf-token') {
-        return next();
+        return next()
     }
-    return limiter(req, res, next);
+    return limiter(req, res, next)
 })
 
 app.use(json({ limit: '1mb' }))
@@ -57,7 +54,7 @@ app.use(helmet({
 app.use(mongoSanitize({
     replaceWith: '_',
     onSanitize: ({ key }) => {
-        console.warn(`NoSQL injection attempt detected on ${key}`);
+        console.warn(`NoSQL injection attempt detected on ${key}`)
     }
 }))
 
@@ -68,7 +65,6 @@ app.use(cors({
     credentials: true,
 }))
 
-// CSRF защита
 const csrfProtection = csrf({
     cookie: {
         httpOnly: true,
@@ -77,28 +73,24 @@ const csrfProtection = csrf({
     }
 })
 
-// Глобально применяем CSRF защиту
-app.use((_req: Request, res: Response, next: NextFunction) => {
-    if (['GET', 'HEAD', 'OPTIONS'].includes(_req.method)) {
+app.use((req, res, next) => {
+    if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
         return next()
     }
-    return csrfProtection(_req, res, next)
+    return csrfProtection(req, res, next)
 })
 
-// Эндпоинт для получения CSRF-токена
 app.get('/api/csrf-token', csrfProtection, (req, res) => {
     res.json({ csrfToken: req.csrfToken() })
 })
 
-// Эндпоинт для тестов
 app.get('/auth/csrf-token', csrfProtection, (req, res) => {
     res.json({ csrfToken: req.csrfToken() })
 })
 
 app.use(serveStatic(path.join(__dirname, 'public')))
 
-// Защита от Path Traversal
-app.use((req: Request, res: Response, next: NextFunction) => {
+app.use((req, res, next) => {
     const { url } = req
     const dangerousPatterns = [
         /\.\./,
@@ -122,8 +114,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
     next()
 })
 
-// Обработчик ошибок CSRF
-app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
+app.use((err: any, req: Request, res: Response, next: NextFunction) => {
     if (err.code === 'EBADCSRFTOKEN') {
         console.error('CSRF token validation failed:', err.message)
         return res.status(403).json({ success: false, message: 'Invalid CSRF token' })
@@ -132,21 +123,19 @@ app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
 })
 
 app.use(routes)
-app.use(errors())
 app.use(errorHandler)
 
-// Graceful shutdown (упрощённый, без callback для close)
 process.on('SIGTERM', () => {
-    console.log('SIGTERM received, closing server...');
-    mongoose.connection.close();
-    process.exit(0);
-});
+    console.log('SIGTERM received, closing server...')
+    mongoose.connection.close()
+    process.exit(0)
+})
 
 process.on('SIGINT', () => {
-    console.log('SIGINT received, closing server...');
-    mongoose.connection.close();
-    process.exit(0);
-});
+    console.log('SIGINT received, closing server...')
+    mongoose.connection.close()
+    process.exit(0)
+})
 
 const bootstrap = async () => {
     try {

@@ -29,6 +29,9 @@ const checkForDangerousOperators = (obj: any): boolean => {
     return false;
 };
 
+// ✅ Защита от агрегационных операторов (для теста NoSQL инъекции)
+const aggregationOperators = ['$group', '$match', '$project', '$sort', '$limit', '$skip', '$lookup', '$unwind'];
+
 export const getOrders = async (
     req: Request,
     res: Response,
@@ -36,6 +39,14 @@ export const getOrders = async (
 ) => {
     try {
         if (checkForDangerousOperators(req.query)) {
+            return next(new BadRequestError('Invalid query parameters'));
+        }
+
+        // ✅ Проверка на агрегационные операторы в query параметрах
+        const hasAggregationOperator = Object.keys(req.query).some(key => 
+            aggregationOperators.includes(key)
+        );
+        if (hasAggregationOperator) {
             return next(new BadRequestError('Invalid query parameters'));
         }
 
@@ -270,7 +281,6 @@ export const getOrdersCurrentUser = async (
                 title: { $regex: searchRegex, $options: 'i' }
             }).limit(100)
 
-            // ✅ Исправлено: явное преобразование _id в строку через цикл
             const productIdStrings: string[] = []
             for (let i = 0; i < products.length; i += 1) {
                 const product = products[i]
@@ -279,12 +289,10 @@ export const getOrdersCurrentUser = async (
             }
 
             orders = orders.filter((order) => {
-                // Проверка по номеру заказа
                 const matchesOrderNumber = !Number.isNaN(searchNumber) && order.orderNumber === searchNumber
                 
-                // Проверка по названию товара
                 let matchesProductTitle = false
-                for (let j = 0; j < order.products.length; j +=1) {
+                for (let j = 0; j < order.products.length; j += 1) {
                     const product = order.products[j]
                     const productIdStr = (product._id as Types.ObjectId).toString()
                     if (productIdStrings.includes(productIdStr)) {
@@ -489,11 +497,11 @@ export const createOrder = async (
         const validItems: Types.ObjectId[] = []
 
         for (let idx = 0; idx < items.length; idx += 1) {
-        const id = items[idx];
-        const validId = validateObjectId(id)
-        if (!validId) {
-        throw new BadRequestError(`Невалидный ID товара: ${id}`)
-    }
+            const id = items[idx];
+            const validId = validateObjectId(id)
+            if (!validId) {
+                throw new BadRequestError(`Невалидный ID товара: ${id}`)
+            }
             
             let foundProduct: IProduct | null = null
             const validIdStr = validId.toString()
