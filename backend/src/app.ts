@@ -66,38 +66,36 @@ app.use(cors({
 }))
 
 // ============================================================
-// ✅ УПРОЩЁННАЯ CSRF ЗАЩИТА (без csurf)
+// ✅ CSRF ЗАЩИТА (совместимая с тестами)
 // ============================================================
 
-// Генерация CSRF токена
 function generateCsrfToken(): string {
     return crypto.randomBytes(32).toString('hex')
 }
 
-// Эндпоинт для получения CSRF токена (для фронтенда)
-app.get('/api/csrf-token', (req, res) => {
-    const token = generateCsrfToken()
-    res.cookie('csrfToken', token, { httpOnly: true, sameSite: 'lax' })
-    res.json({ csrfToken: token })
-})
-
-// Эндпоинт для тестов
+// Эндпоинт для получения CSRF токена (для тестов ожидают _csrf cookie)
 app.get('/auth/csrf-token', (req, res) => {
     const token = generateCsrfToken()
-    res.cookie('csrfToken', token, { httpOnly: true, sameSite: 'lax' })
+    // Тесты ожидают cookie с именем _csrf
+    res.cookie('_csrf', token, { httpOnly: true, sameSite: 'lax' })
     res.json({ csrfToken: token })
 })
 
-// ✅ MIDDLEWARE ДЛЯ ПРОВЕРКИ CSRF (для мутирующих методов)
+app.get('/api/csrf-token', (req, res) => {
+    const token = generateCsrfToken()
+    res.cookie('_csrf', token, { httpOnly: true, sameSite: 'lax' })
+    res.json({ csrfToken: token })
+})
+
+// Middleware для проверки CSRF
 app.use((req, res, next) => {
-    // Пропускаем безопасные методы
     if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
         return next()
     }
     
-    // Получаем токен из заголовка
-    const token = req.headers['csrf-token'] || req.headers['x-csrf-token']
-    const cookieToken = req.cookies?.csrfToken
+    // Поддерживаем оба варианта: _csrf и csrf-token
+    const token = req.headers['csrf-token'] || req.headers['x-csrf-token'] || req.body?._csrf
+    const cookieToken = req.cookies?._csrf
     
     if (!token || !cookieToken || token !== cookieToken) {
         console.warn(`CSRF validation failed for ${req.method} ${req.path}`)
@@ -109,7 +107,6 @@ app.use((req, res, next) => {
 
 app.use(serveStatic(path.join(__dirname, 'public')))
 
-// Защита от Path Traversal
 app.use((req, res, next) => {
     const { url } = req
     const dangerousPatterns = [
