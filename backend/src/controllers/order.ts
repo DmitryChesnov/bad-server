@@ -16,7 +16,7 @@ const MAX_EMAIL_LENGTH = 100
 const MAX_ORDER_TOTAL = 1000000
 const MAX_SEARCH_LENGTH = 100
 
-// ✅ Защита от NoSQL инъекций в агрегации
+// Защита от NoSQL инъекций в агрегации
 const dangerousOperators = ['$where', '$function', '$expr', '$jsonSchema', '$regex', '$options'];
 const checkForDangerousOperators = (obj: any): boolean => {
     if (!obj || typeof obj !== 'object') return false;
@@ -33,7 +33,7 @@ export const getOrders = async (
     next: NextFunction
 ) => {
     try {
-        // ✅ Защита от NoSQL инъекций в query параметрах
+        // Защита от NoSQL инъекций в query параметрах
         if (checkForDangerousOperators(req.query)) {
             return next(new BadRequestError('Invalid query parameters'));
         }
@@ -52,7 +52,6 @@ export const getOrders = async (
         } = req.query
 
         const pageNum = Math.max(1, Number(page) || 1)
-        // ✅ Исправлено: лимит ограничен 10 (как требует тест)
         const limitNum = Math.min(10, Math.max(1, Number(limit) || 10))
 
         const filters: FilterQuery<Partial<IOrder>> = {}
@@ -437,16 +436,24 @@ export const createOrder = async (
         const userId = res.locals.user._id
         
         const { payment, total, items } = req.body
+        
+        // ✅ Полная санитизация всех полей (XSS защита)
         const address = req.body.address ? sanitizeHtml(String(req.body.address)).slice(0, MAX_ADDRESS_LENGTH) : ''
         const phone = req.body.phone ? sanitizeHtml(String(req.body.phone)).slice(0, MAX_PHONE_LENGTH) : ''
         const email = req.body.email ? sanitizeHtml(String(req.body.email)).slice(0, MAX_EMAIL_LENGTH) : ''
         const comment = req.body.comment ? sanitizeHtml(String(req.body.comment)).slice(0, MAX_COMMENT_LENGTH) : ''
 
+        // Валидация email
         if (email && email.length > 0) {
             const emailRegex = /^[^\s@]+@([^\s@.,]+\.)+[^\s@.,]{2,}$/
             if (!emailRegex.test(email)) {
                 return next(new BadRequestError('Невалидный формат email'))
             }
+        }
+
+        // Валидация телефона (только цифры, плюс, пробелы, дефисы, скобки)
+        if (phone && !/^[\d+\-()\s]{5,20}$/.test(phone)) {
+            return next(new BadRequestError('Невалидный формат телефона'))
         }
 
         if (!items || !Array.isArray(items)) {
@@ -513,6 +520,7 @@ export const createOrder = async (
 
         await newOrder.save()
 
+        // ✅ Возвращаем санитизированные данные в ответе
         const sanitizedOrder = {
             ...newOrder.toObject(),
             comment,

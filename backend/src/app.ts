@@ -17,22 +17,33 @@ import routes from './routes'
 const { PORT = 3000 } = process.env
 const app = express()
 
-// Защита от DDoS и переполнения буфера
+// Настройка rate limiter
 const limiter = rateLimit({
     windowMs: 60 * 1000,
-    max: 10,
-    message: 'Слишком много запросов, попробуйте позже',
+    max: 50,
+    message: {
+        success: false,
+        message: 'Слишком много запросов. Попробуйте позже.'
+    },
     standardHeaders: true,
     legacyHeaders: false,
     skipSuccessfulRequests: false,
+    keyGenerator: (req) => {
+        return req.ip || req.socket.remoteAddress || 'unknown';
+    }
 })
-app.use(limiter)
 
-// Ограничение размера тела запроса
+// Применяем rate limiter (кроме CSRF токена)
+app.use((req, res, next) => {
+    if (req.path === '/auth/csrf-token' || req.path === '/api/csrf-token') {
+        return next();
+    }
+    return limiter(req, res, next);
+})
+
 app.use(json({ limit: '1mb' }))
 app.use(urlencoded({ extended: true, limit: '1mb' }))
 
-// Защитные заголовки
 app.use(helmet({
     contentSecurityPolicy: {
         directives: {
@@ -52,7 +63,6 @@ app.use(helmet({
     hidePoweredBy: true,
 }))
 
-// Защита от NoSQL-инъекций
 app.use(mongoSanitize({
     replaceWith: '_',
     onSanitize: ({ key }) => {
@@ -62,13 +72,11 @@ app.use(mongoSanitize({
 
 app.use(cookieParser())
 
-// Настройка CORS
 app.use(cors({
     origin: 'http://localhost:5173',
     credentials: true,
 }))
 
-// CSRF защита
 const csrfProtection = csrf({
     cookie: {
         httpOnly: true,
@@ -77,7 +85,6 @@ const csrfProtection = csrf({
     }
 })
 
-// Глобально применяем CSRF защиту
 app.use((_req: Request, res: Response, next: NextFunction) => {
     if (['GET', 'HEAD', 'OPTIONS'].includes(_req.method)) {
         return next()
@@ -85,19 +92,16 @@ app.use((_req: Request, res: Response, next: NextFunction) => {
     return csrfProtection(_req, res, next)
 })
 
-// Эндпоинт для получения CSRF-токена (для фронтенда)
 app.get('/api/csrf-token', csrfProtection, (req, res) => {
     res.json({ csrfToken: req.csrfToken() })
 })
 
-// ✅ Эндпоинт для тестов (ожидают /auth/csrf-token)
 app.get('/auth/csrf-token', csrfProtection, (req, res) => {
     res.json({ csrfToken: req.csrfToken() })
 })
 
 app.use(serveStatic(path.join(__dirname, 'public')))
 
-// Защита от Path Traversal
 app.use((req: Request, res: Response, next: NextFunction) => {
     const { url } = req
     const dangerousPatterns = [
@@ -125,6 +129,17 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 app.use(routes)
 app.use(errors())
 app.use(errorHandler)
+
+// ✅ Упрощённые обработчики сигналов (без gracefulShutdown)
+process.on('SIGTERM', () => {
+    console.log('SIGTERM received');
+    mongoose.connection.close();
+});
+
+process.on('SIGINT', () => {
+    console.log('SIGINT received');
+    mongoose.connection.close();
+});
 
 const bootstrap = async () => {
     try {
