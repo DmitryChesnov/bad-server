@@ -33,7 +33,6 @@ export const getOrders = async (
     next: NextFunction
 ) => {
     try {
-        // Защита от NoSQL инъекций в query параметрах
         if (checkForDangerousOperators(req.query)) {
             return next(new BadRequestError('Invalid query parameters'));
         }
@@ -269,13 +268,29 @@ export const getOrdersCurrentUser = async (
                 title: { $regex: searchRegex, $options: 'i' }
             }).limit(100)
 
-            const productIds = products.map((product) => product._id)
+            // ✅ Исправлено: явное преобразование _id в строку через цикл
+            const productIdStrings: string[] = []
+            for (let i = 0; i < products.length; i++) {
+                const product = products[i]
+                const idStr = (product._id as Types.ObjectId).toString()
+                productIdStrings.push(idStr)
+            }
 
             orders = orders.filter((order) => {
-                const matchesProductTitle = order.products.some((product: any) =>
-                    productIds.some((id) => id.equals(product._id))
-                )
+                // Проверка по номеру заказа
                 const matchesOrderNumber = !Number.isNaN(searchNumber) && order.orderNumber === searchNumber
+                
+                // Проверка по названию товара
+                let matchesProductTitle = false
+                for (let j = 0; j < order.products.length; j++) {
+                    const product = order.products[j]
+                    const productIdStr = (product._id as Types.ObjectId).toString()
+                    if (productIdStrings.includes(productIdStr)) {
+                        matchesProductTitle = true
+                        break
+                    }
+                }
+                
                 return matchesOrderNumber || matchesProductTitle
             })
         }
@@ -436,14 +451,11 @@ export const createOrder = async (
         const userId = res.locals.user._id
         
         const { payment, total, items } = req.body
-        
-        // ✅ Полная санитизация всех полей (XSS защита)
         const address = req.body.address ? sanitizeHtml(String(req.body.address)).slice(0, MAX_ADDRESS_LENGTH) : ''
         const phone = req.body.phone ? sanitizeHtml(String(req.body.phone)).slice(0, MAX_PHONE_LENGTH) : ''
         const email = req.body.email ? sanitizeHtml(String(req.body.email)).slice(0, MAX_EMAIL_LENGTH) : ''
         const comment = req.body.comment ? sanitizeHtml(String(req.body.comment)).slice(0, MAX_COMMENT_LENGTH) : ''
 
-        // Валидация email
         if (email && email.length > 0) {
             const emailRegex = /^[^\s@]+@([^\s@.,]+\.)+[^\s@.,]{2,}$/
             if (!emailRegex.test(email)) {
@@ -451,7 +463,6 @@ export const createOrder = async (
             }
         }
 
-        // Валидация телефона (только цифры, плюс, пробелы, дефисы, скобки)
         if (phone && !/^[\d+\-()\s]{5,20}$/.test(phone)) {
             return next(new BadRequestError('Невалидный формат телефона'))
         }
@@ -475,22 +486,33 @@ export const createOrder = async (
 
         const validItems: Types.ObjectId[] = []
 
-        items.forEach((id: string) => {
+        for (const id of items) {
             const validId = validateObjectId(id)
             if (!validId) {
                 throw new BadRequestError(`Невалидный ID товара: ${id}`)
             }
-
-            const product = products.find((p) => p._id.equals(validId))
-            if (!product) {
+            
+            let foundProduct: IProduct | null = null
+            const validIdStr = validId.toString()
+            
+            for (let i = 0; i < products.length; i++) {
+                const product = products[i]
+                const productIdStr = (product._id as Types.ObjectId).toString()
+                if (productIdStr === validIdStr) {
+                    foundProduct = product
+                    break
+                }
+            }
+            
+            if (!foundProduct) {
                 throw new BadRequestError(`Товар с id ${id} не найден`)
             }
-            if (product.price === null) {
+            if (foundProduct.price === null) {
                 throw new BadRequestError(`Товар с id ${id} не продается`)
             }
-            basket.push(product)
+            basket.push(foundProduct)
             validItems.push(validId)
-        })
+        }
 
         const totalBasket = basket.reduce((a, c) => a + (c.price || 0), 0)
         if (totalBasket !== totalAmount) {
@@ -520,7 +542,6 @@ export const createOrder = async (
 
         await newOrder.save()
 
-        // ✅ Возвращаем санитизированные данные в ответе
         const sanitizedOrder = {
             ...newOrder.toObject(),
             comment,
