@@ -38,6 +38,7 @@ export const getOrders = async (
     next: NextFunction
 ) => {
     try {
+        // Защита от опасных операторов
         if (checkForDangerousOperators(req.query)) {
             return next(new BadRequestError('Invalid query parameters'));
         }

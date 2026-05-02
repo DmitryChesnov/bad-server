@@ -22,17 +22,15 @@ const isTestEnv = process.env.NODE_ENV === 'test' || process.env.CI === 'true'
 // Настройка rate limiter
 const limiter = rateLimit({
     windowMs: 60 * 1000,
-    max: isTestEnv ? 1000 : 50, // Для тестов большой лимит, для production - 50
+    max: isTestEnv ? 1000 : 50,
     message: { success: false, message: 'Слишком много запросов. Попробуйте позже.' },
 })
 
-// Применяем rate limiter (для тестов пропускаем)
+// Применяем rate limiter
 app.use((req, res, next) => {
-    // Всегда пропускаем CSRF эндпоинты
     if (req.path === '/auth/csrf-token' || req.path === '/api/csrf-token') {
         return next()
     }
-    // Для тестов применяем большой лимит, для production - обычный
     return limiter(req, res, next)
 })
 
@@ -80,7 +78,6 @@ function generateCsrfToken(): string {
     return crypto.randomBytes(32).toString('hex')
 }
 
-// Эндпоинт для получения CSRF токена
 app.get('/auth/csrf-token', (req, res) => {
     const token = generateCsrfToken()
     res.cookie('_csrf', token, { httpOnly: true, sameSite: 'lax' })
@@ -93,14 +90,11 @@ app.get('/api/csrf-token', (req, res) => {
     res.json({ csrfToken: token })
 })
 
-// Middleware для проверки CSRF
 app.use((req, res, next) => {
-    // Пропускаем безопасные методы
     if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
         return next()
     }
     
-    // Получаем токен из заголовка или тела запроса
     const token = req.headers['csrf-token'] || req.headers['x-csrf-token'] || req.body?._csrf
     const cookieToken = req.cookies?._csrf
     
@@ -114,7 +108,6 @@ app.use((req, res, next) => {
 
 app.use(serveStatic(path.join(__dirname, 'public')))
 
-// Защита от Path Traversal
 app.use((req, res, next) => {
     const { url } = req
     const dangerousPatterns = [
@@ -156,14 +149,21 @@ process.on('SIGINT', () => {
 
 const bootstrap = async () => {
     try {
-        await mongoose.connect(DB_ADDRESS)
+        // ✅ Улучшенные настройки подключения к MongoDB для предотвращения таймаутов
+        await mongoose.connect(DB_ADDRESS, {
+            maxPoolSize: 10,
+            serverSelectionTimeoutMS: 5000,
+            socketTimeoutMS: 45000,
+            connectTimeoutMS: 10000,
+            family: 4,
+        })
         console.log('✅ MongoDB connected successfully')
         
         app.listen(PORT, () => {
             console.log(`✅ Server running on port ${PORT}`)
             console.log(`✅ CSRF endpoint: http://localhost:${PORT}/auth/csrf-token`)
             console.log(`✅ Environment: ${isTestEnv ? 'TEST' : 'PRODUCTION'}`)
-            console.log(`✅ Rate limit: ${isTestEnv ? 'disabled (1000 req/min)' : '50 req/min'}`)
+            console.log(`✅ Rate limit: ${isTestEnv ? '1000 req/min' : '50 req/min'}`)
         })
     } catch (error) {
         console.error('❌ Bootstrap error:', error)
