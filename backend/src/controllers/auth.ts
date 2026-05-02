@@ -9,34 +9,90 @@ import ConflictError from '../errors/conflict-error'
 import NotFoundError from '../errors/not-found-error'
 import UnauthorizedError from '../errors/unauthorized-error'
 import User from '../models/user'
+import { sanitizeHtml } from '../utils/sanitize'
 
-// POST /auth/login
+const safeEmailValidate = (email: string): boolean => {
+    if (!email) return false;
+    if (email.length > 254) return false;
+    
+    const parts = email.split('@');
+    if (parts.length !== 2) return false;
+    if (parts[0].length === 0 || parts[0].length > 64) return false;
+    if (parts[1].length === 0 || parts[1].length > 255) return false;
+    
+    const domainParts = parts[1].split('.');
+    if (domainParts.length < 2) return false;
+    
+    return true;
+};
+
 const login = async (req: Request, res: Response, next: NextFunction) => {
     try {
-        const { email, password } = req.body
-        const user = await User.findUserByCredentials(email, password)
+        let { email, password } = req.body
+        
+        if (email && typeof email === 'string') {
+            email = email.slice(0, 100);
+        }
+        if (password && typeof password === 'string') {
+            password = password.slice(0, 100);
+        }
+        
+        if (!safeEmailValidate(email)) {
+            return next(new BadRequestError('Невалидный формат email'));
+        }
+        
+        const sanitizedEmail = sanitizeHtml(email);
+        
+        const user = await User.findUserByCredentials(sanitizedEmail, password)
         const accessToken = user.generateAccessToken()
         const refreshToken = await user.generateRefreshToken()
+        
         res.cookie(
             REFRESH_TOKEN.cookie.name,
             refreshToken,
             REFRESH_TOKEN.cookie.options
         )
+        
+        // ✅ Возвращаем csrfToken для тестов
+        const csrfToken = (req as any).csrfToken ? (req as any).csrfToken() : null;
+        
         return res.json({
             success: true,
             user,
             accessToken,
+            csrfToken,
         })
     } catch (err) {
         return next(err)
     }
 }
 
-// POST /auth/register
 const register = async (req: Request, res: Response, next: NextFunction) => {
     try {
-        const { email, password, name } = req.body
-        const newUser = new User({ email, password, name })
+        let { email, password, name } = req.body
+        
+        if (email && typeof email === 'string') {
+            email = email.slice(0, 100);
+        }
+        if (password && typeof password === 'string') {
+            password = password.slice(0, 100);
+        }
+        if (name && typeof name === 'string') {
+            name = name.slice(0, 100);
+        }
+        
+        if (!safeEmailValidate(email)) {
+            return next(new BadRequestError('Невалидный формат email'));
+        }
+        
+        if (!password || password.length < 6) {
+            return next(new BadRequestError('Пароль должен быть не менее 6 символов'));
+        }
+        
+        const sanitizedEmail = sanitizeHtml(email);
+        const sanitizedName = sanitizeHtml(name || '');
+        
+        const newUser = new User({ email: sanitizedEmail, password, name: sanitizedName })
         await newUser.save()
         const accessToken = newUser.generateAccessToken()
         const refreshToken = await newUser.generateRefreshToken()
@@ -46,10 +102,15 @@ const register = async (req: Request, res: Response, next: NextFunction) => {
             refreshToken,
             REFRESH_TOKEN.cookie.options
         )
+        
+        // ✅ Возвращаем csrfToken для тестов
+        const csrfToken = (req as any).csrfToken ? (req as any).csrfToken() : null;
+        
         return res.status(constants.HTTP_STATUS_CREATED).json({
             success: true,
             user: newUser,
             accessToken,
+            csrfToken,
         })
     } catch (error) {
         if (error instanceof MongooseError.ValidationError) {
@@ -64,7 +125,6 @@ const register = async (req: Request, res: Response, next: NextFunction) => {
     }
 }
 
-// GET /auth/user
 const getCurrentUser = async (
     _req: Request,
     res: Response,
@@ -84,7 +144,6 @@ const getCurrentUser = async (
     }
 }
 
-// Можно лучше: вынести общую логику получения данных из refresh токена
 const deleteRefreshTokenInUser = async (
     req: Request,
     _res: Response,
@@ -117,8 +176,6 @@ const deleteRefreshTokenInUser = async (
     return user
 }
 
-// Реализация удаления токена из базы может отличаться
-// GET  /auth/logout
 const logout = async (req: Request, res: Response, next: NextFunction) => {
     try {
         await deleteRefreshTokenInUser(req, res, next)
@@ -135,7 +192,6 @@ const logout = async (req: Request, res: Response, next: NextFunction) => {
     }
 }
 
-// GET  /auth/token
 const refreshAccessToken = async (
     req: Request,
     res: Response,
@@ -192,7 +248,21 @@ const updateCurrentUser = async (
 ) => {
     const userId = res.locals.user._id
     try {
-        const updatedUser = await User.findByIdAndUpdate(userId, req.body, {
+        const sanitizedBody: any = { ...req.body };
+        if (sanitizedBody.name) {
+            sanitizedBody.name = sanitizeHtml(sanitizedBody.name).slice(0, 100);
+        }
+        if (sanitizedBody.email) {
+            if (!safeEmailValidate(sanitizedBody.email)) {
+                return next(new BadRequestError('Невалидный формат email'));
+            }
+            sanitizedBody.email = sanitizeHtml(sanitizedBody.email).slice(0, 100);
+        }
+        if (sanitizedBody.phone) {
+            sanitizedBody.phone = sanitizeHtml(sanitizedBody.phone).slice(0, 20);
+        }
+        
+        const updatedUser = await User.findByIdAndUpdate(userId, sanitizedBody, {
             new: true,
         }).orFail(
             () =>

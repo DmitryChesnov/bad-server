@@ -7,8 +7,6 @@ import NotFoundError from '../errors/not-found-error'
 import UnauthorizedError from '../errors/unauthorized-error'
 import UserModel, { Role } from '../models/user'
 
-// есть файл middlewares/auth.js, в нём мидлвэр для проверки JWT;
-
 const auth = async (req: Request, res: Response, next: NextFunction) => {
     let payload: JwtPayload | null = null
     const authHeader = req.header('Authorization')
@@ -42,14 +40,23 @@ const auth = async (req: Request, res: Response, next: NextFunction) => {
 }
 
 export function roleGuardMiddleware(...roles: Role[]) {
-    return (_req: Request, res: Response, next: NextFunction) => {
+    return (req: Request, res: Response, next: NextFunction) => {
+        // ✅ ИСПРАВЛЕНО: добавлен параметр req (вместо _req) и явная типизация userRoles
+        // Проверяем, есть ли пользователь в res.locals.user
         if (!res.locals.user) {
             return next(new UnauthorizedError('Необходима авторизация'))
         }
 
-        const hasAccess = roles.some((role) =>
-            res.locals.user.roles.includes(role)
-        )
+        // ✅ ИСПРАВЛЕНО: явное приведение типа для userRoles
+        const userRoles: Role[] = res.locals.user.roles || []
+        
+        // ✅ ИСПРАВЛЕНО: проверка, что userRoles - массив (хотя это уже гарантировано)
+        if (!Array.isArray(userRoles)) {
+            return next(new ForbiddenError('Доступ запрещен: некорректные роли'))
+        }
+        
+        // Проверяем, есть ли у пользователя хотя бы одна из требуемых ролей
+        const hasAccess = roles.some(role => userRoles.includes(role))
 
         if (!hasAccess) {
             return next(new ForbiddenError('Доступ запрещен'))
@@ -71,7 +78,9 @@ export function currentUserAccessMiddleware<T>(
             return next(new UnauthorizedError('Необходима авторизация'))
         }
 
-        if (res.locals.user.roles.includes(Role.Admin)) {
+        // ✅ ИСПРАВЛЕНО: проверка на наличие ролей перед includes
+        const userRoles = res.locals.user.roles || []
+        if (userRoles.includes(Role.Admin)) {
             return next()
         }
 
