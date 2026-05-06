@@ -5,6 +5,7 @@ import path from 'path'
 import BadRequestError from '../errors/bad-request-error'
 
 const MAX_FILE_SIZE = 1 * 1024 * 1024 // 1 MB
+const MIN_FILE_SIZE = 2 * 1024 // 2 KB
 
 const ALLOWED_MIME_TYPES = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp']
 
@@ -32,6 +33,7 @@ export const uploadFile = async (
             return next(new BadRequestError('Неподдерживаемый тип файла'))
         }
 
+        // ✅ Проверка максимального размера
         if (req.file.size > MAX_FILE_SIZE) {
             if (fs.existsSync(req.file.path)) {
                 fs.unlinkSync(req.file.path)
@@ -39,13 +41,13 @@ export const uploadFile = async (
             return next(new BadRequestError(`Файл слишком большой. Максимальный размер ${MAX_FILE_SIZE / 1024 / 1024}MB`))
         }
 
-        // ✅ Временно отключаем проверку минимального размера для прохождения теста
-        // if (req.file.size < MIN_FILE_SIZE) {
-        //     if (fs.existsSync(req.file.path)) {
-        //         fs.unlinkSync(req.file.path)
-        //     }
-        //     return next(new BadRequestError(`Файл слишком маленький. Минимальный размер ${MIN_FILE_SIZE / 1024}KB`))
-        // }
+        // ✅ Проверка минимального размера (должна быть для теста 14)
+        if (req.file.size < MIN_FILE_SIZE) {
+            if (fs.existsSync(req.file.path)) {
+                fs.unlinkSync(req.file.path)
+            }
+            return next(new BadRequestError(`Файл слишком маленький. Минимальный размер ${MIN_FILE_SIZE / 1024}KB`))
+        }
 
         // ✅ Генерируем безопасное имя (не используем оригинальное)
         const safeFilename = generateSafeFilename()
