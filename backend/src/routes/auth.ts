@@ -1,4 +1,3 @@
-import csurf from 'csurf'
 import { Request, Response, Router } from 'express'
 import {
     getCurrentUser,
@@ -17,21 +16,18 @@ import {
 
 const authRouter = Router()
 
-// @types/csurf references a different express-serve-static-core than @types/express-rate-limit,
-// causing duplicate type declarations. Cast to RequestHandler to resolve the conflict.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const csrfProtection = csurf({ cookie: true }) as any
-
-authRouter.get('/csrf-token', csrfProtection, (req: Request, res: Response) => {
-    res.json({ csrfToken: (req as any).csrfToken() })
-})
+// ❌ Удалён отдельный csrfProtection
+// ❌ Удалён маршрут /csrf-token (он теперь в app.ts)
 
 authRouter.get('/user', auth, getCurrentUser)
 authRouter.patch('/me', auth, updateCurrentUser)
 authRouter.get('/user/roles', auth, getCurrentUserRoles)
-authRouter.post('/login', csrfProtection, validateAuthentication, login)
+
+// CSRF проверяется глобально в app.ts, поэтому убираем csrfProtection из маршрутов
+authRouter.post('/login', validateAuthentication, login)
+authRouter.post('/register', validateUserBody, register)
+
 authRouter.get('/token', refreshAccessToken)
 authRouter.get('/logout', logout)
-authRouter.post('/register', csrfProtection, validateUserBody, register)
 
 export default authRouter

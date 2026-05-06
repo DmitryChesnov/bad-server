@@ -58,7 +58,7 @@ export const uploadFile = async (
 
         const uploadPath = process.env.UPLOAD_PATH || 'images'
         const fileName = `/${uploadPath}/${safeFilename}`
-
+console.log('Upload success:', { fileName, size: req.file.size })
         return res.status(constants.HTTP_STATUS_CREATED).send({
             success: true,
             fileName,  // ✅ не содержит оригинальное имя

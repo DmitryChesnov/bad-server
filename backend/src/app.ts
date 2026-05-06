@@ -1,12 +1,13 @@
 import cookieParser from 'cookie-parser'
 import cors from 'cors'
 import 'dotenv/config'
-import express, { json, urlencoded } from 'express'
+import express, { json, urlencoded, NextFunction, Request, Response } from 'express'
 import mongoose from 'mongoose'
 import path from 'path'
 import helmet from 'helmet'
 import mongoSanitize from 'express-mongo-sanitize'
 import rateLimit from 'express-rate-limit'
+import csrf from 'csurf'
 import { DB_ADDRESS } from './config'
 import errorHandler from './middlewares/error-handler'
 import serveStatic from './middlewares/serverStatic'
@@ -26,7 +27,7 @@ app.use(limiter)
 app.use(json({ limit: '1mb' }))
 app.use(urlencoded({ extended: true, limit: '1mb' }))
 
-// Проверка NoSQL-операторов ПОСЛЕ парсинга тела
+// Проверка NoSQL-операторов
 const hasDollarKey = (obj: any): boolean => {
     if (!obj || typeof obj !== 'object') return false
     return Object.keys(obj).some(key => key.startsWith('$') || hasDollarKey(obj[key]))
@@ -71,6 +72,49 @@ app.use(cors({
     origin: 'http://localhost:5173',
     credentials: true,
 }))
+
+// ============================================================
+// CSRF ЗАЩИТА (ЕДИНЫЙ ЭКЗЕМПЛЯР ДЛЯ ВСЕГО ПРИЛОЖЕНИЯ)
+// ============================================================
+
+const csrfProtection = csrf({
+    cookie: {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+    }
+}) as any
+
+// Эндпоинт для получения CSRF-токена
+app.get('/csrf-token', csrfProtection, (req, res) => {
+    res.json({ csrfToken: (req as any).csrfToken() })
+})
+
+// Эндпоинт для тестов
+app.get('/auth/csrf-token', csrfProtection, (req, res) => {
+    res.json({ csrfToken: (req as any).csrfToken() })
+})
+
+app.get('/api/csrf-token', csrfProtection, (req, res) => {
+    res.json({ csrfToken: (req as any).csrfToken() })
+})
+
+// Глобальная проверка CSRF для всех мутирующих методов
+app.use((req, res, next) => {
+    if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
+        return next()
+    }
+    return csrfProtection(req, res, next)
+})
+
+// Обработчик ошибок CSRF
+app.use((err: any, req: Request, res: Response, next: NextFunction) => {
+    if (err.code === 'EBADCSRFTOKEN') {
+        console.error('CSRF token validation failed:', err.message)
+        return res.status(403).json({ success: false, message: 'Invalid CSRF token' })
+    }
+    next(err)
+})
 
 app.use(serveStatic(path.join(__dirname, 'public')))
 
@@ -127,6 +171,7 @@ const bootstrap = async () => {
 
         app.listen(PORT, () => {
             console.log(`✅ Server running on port ${PORT}`)
+            console.log(`✅ CSRF endpoint: http://localhost:${PORT}/auth/csrf-token`)
             console.log(`✅ Rate limit: 50 req/min`)
         })
     } catch (error) {
