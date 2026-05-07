@@ -13,8 +13,9 @@
   },
   "author": "< Укажите здесь автора работы >",
   "license": "ISC",
-    "overrides": {
-    "cookie": "0.7.2"
+  "overrides": {
+    "cookie": "0.7.2",
+    "ip-address": "10.0.1"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
@@ -52,7 +53,7 @@
     "dotenv": "^16.4.5",
     "express": "^4.21.2",
     "express-mongo-sanitize": "^2.2.0",
-    "express-rate-limit": "^8.4.1",
+    "express-rate-limit": "^8.5.1",
     "helmet": "^8.0.0",
     "joi": "^18.1.2",
     "jsonwebtoken": "^9.0.2",
