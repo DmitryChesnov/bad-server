@@ -15,7 +15,7 @@
   "license": "ISC",
   "overrides": {
     "cookie": "0.7.2",
-    "ip-address": "10.0.1"
+    "ip-address": "10.2.0"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
