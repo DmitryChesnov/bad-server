@@ -1,20 +1,6 @@
 import { NextFunction, Request, Response } from 'express'
 import { constants } from 'http2'
-import fs from 'fs'
-import path from 'path'
 import BadRequestError from '../errors/bad-request-error'
-
-const MAX_FILE_SIZE = 1 * 1024 * 1024 // 1 MB
-const MIN_FILE_SIZE = 2 * 1024 // 2 KB
-
-const ALLOWED_MIME_TYPES = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp']
-
-// ✅ Исправлено: имя файла НЕ содержит оригинальное имя
-function generateSafeFilename(): string {
-    const timestamp = Date.now()
-    const random = Math.random().toString(36).substring(2, 15)
-    return `${timestamp}_${random}.png`
-}
 
 export const uploadFile = async (
     req: Request,
@@ -24,55 +10,15 @@ export const uploadFile = async (
     if (!req.file) {
         return next(new BadRequestError('Файл не загружен'))
     }
-
     try {
-        if (!ALLOWED_MIME_TYPES.includes(req.file.mimetype)) {
-            if (fs.existsSync(req.file.path)) {
-                fs.unlinkSync(req.file.path)
-            }
-            return next(new BadRequestError('Неподдерживаемый тип файла'))
-        }
-
-        // ✅ Проверка максимального размера
-        if (req.file.size > MAX_FILE_SIZE) {
-            if (fs.existsSync(req.file.path)) {
-                fs.unlinkSync(req.file.path)
-            }
-            return next(new BadRequestError(`Файл слишком большой. Максимальный размер ${MAX_FILE_SIZE / 1024 / 1024}MB`))
-        }
-
-        // ✅ Проверка минимального размера (должна быть для теста 14)
-        if (req.file.size < MIN_FILE_SIZE) {
-            if (fs.existsSync(req.file.path)) {
-                fs.unlinkSync(req.file.path)
-            }
-            return next(new BadRequestError(`Файл слишком маленький. Минимальный размер ${MIN_FILE_SIZE / 1024}KB`))
-        }
-
-        // ✅ Генерируем безопасное имя (не используем оригинальное)
-        const safeFilename = generateSafeFilename()
-        const newFilePath = path.join(path.dirname(req.file.path), safeFilename)
-        fs.renameSync(req.file.path, newFilePath)
-        req.file.filename = safeFilename
-        req.file.path = newFilePath
-
-        const uploadPath = process.env.UPLOAD_PATH || 'images'
-        const fileName = `/${uploadPath}/${safeFilename}`
-console.log('Upload success:', { fileName, size: req.file.size })
+        const fileName = process.env.UPLOAD_PATH
+            ? `/${process.env.UPLOAD_PATH}/${req.file.filename}`
+            : `/${req.file?.filename}`
         return res.status(constants.HTTP_STATUS_CREATED).send({
-            success: true,
-            fileName,  // ✅ не содержит оригинальное имя
-            size: req.file.size,
-            mimeType: req.file.mimetype,
+            fileName,
+            originalName: req.file?.originalname,
         })
     } catch (error) {
-        if (req.file && req.file.path && fs.existsSync(req.file.path)) {
-            try {
-                fs.unlinkSync(req.file.path)
-            } catch (unlinkError) {
-                console.error('Ошибка при удалении временного файла:', unlinkError)
-            }
-        }
         return next(error)
     }
 }
